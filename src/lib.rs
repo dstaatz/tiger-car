@@ -16,8 +16,8 @@ fn linear_map(input: f64, a: (f64, f64), b: (f64, f64)) -> f64 {
 
 
 // Pins
-const DRIVETRAIN_PWM0: u8 = 5;
-const DRIVETRAIN_PWM1: u8 = 6;
+const DRIVETRAIN_PWM0: u8 = 5; // 12
+const DRIVETRAIN_PWM1: u8 = 6; // 13
 
 
 struct DrivetrainController {
@@ -152,6 +152,46 @@ impl TigerCar {
 ////////////////////////////////////////////////////////////////////////////////
 
 
+use std::thread::sleep;
+use std::time::Duration;
+
+
+fn run_drivetrain() {
+    let mut controller = DrivetrainController::new(60.0, 0.2).unwrap();
+
+    // for i in -10..11 {
+    //     controller.set_output(0.1 * i as f64).unwrap();    
+    //     sleep(Duration::new(2, 0));
+    // }
+
+    controller.set_output(1.0).unwrap();    
+    sleep(Duration::new(1, 0));
+    controller.set_output(0.0).unwrap();    
+}
+
+fn run_steering() {
+    let mut controller = DrivetrainController::new(50.0, 0.0).unwrap();
+
+    for i in -10..11 {
+        controller.set_output(0.1 * i as f64).unwrap();
+        sleep(Duration::new(0, 500_000_000));
+    }
+
+    controller.set_output(-0.5).unwrap();
+    sleep(Duration::new(1, 0));
+    controller.set_output(0.5).unwrap();
+    sleep(Duration::new(1, 0));
+    controller.set_output(0.0).unwrap();
+}
+
+pub fn run() {
+    run_drivetrain()
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+
 #[cfg(test)]
 mod tests {
 
@@ -166,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_full_drivetrain_scale() {
-        unimplemented!();
+        DrivetrainController::new(60.0, 0.5).unwrap();
     }
 
     #[test]
