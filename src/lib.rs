@@ -15,12 +15,7 @@ fn linear_map(input: f64, a: (f64, f64), b: (f64, f64)) -> f64 {
 ////////////////////////////////////////////////////////////////////////////////
 
 
-// Pins
-const DRIVETRAIN_PWM0: u8 = 5; // 12
-const DRIVETRAIN_PWM1: u8 = 6; // 13
-
-
-struct DrivetrainController {
+struct DualSoftwarePwm {
     gpio: gpio::Gpio,
     pwm_0: gpio::OutputPin,
     pwm_1: gpio::OutputPin,
@@ -28,27 +23,32 @@ struct DrivetrainController {
     min_duty_cycle: f64,
 }
 
+impl DualSoftwarePwm {
 
-impl DrivetrainController {
-
-    /// Creates a new drivetrain that is set to the given frequency.
-    ///
+    /// `pwm0_pin` is BCM GPIO pin number to output pwm0 on
+    /// 
+    /// `pwm1_pin` is BCM GPIO pin number to output pwm1 on
+    /// 
     /// `frequency` is specified in hertz (Hz) and must be `>= 0`.
     ///
     /// `min_duty_cycle` is lowest duty cycle that should be outputted. This
-    /// value is bounded on the interval `[0.0, 1.0]`. Most DC motors will try
-    /// to drive with low duty cycles, but will fail to move. By finding and
+    /// value is bounded on the interval `[0.0, 1.0]`. By finding and
     /// setting this value correctly the output functions of will correctly map
     /// the interval `(0.0, 1.0]` to `(min_duty_cycle, 1.0]` while still
     /// allowing the setting of output to `0.0`.
     ///
     /// Implemented with software PWMs, therefore higher freuquencies may not
     /// work. Additionally, general performance may not be consistent.
-    fn new(frequency: f64, min_duty_cycle: f64) -> gpio::Result<Self> {
+    fn new(
+        pwm0_pin: u8,
+        pwm1_pin: u8,
+        frequency: f64,
+        min_duty_cycle: f64)
+    -> gpio::Result<Self> {
 
         let gpio = gpio::Gpio::new()?;
-        let pwm_0 = gpio.get(DRIVETRAIN_PWM0)?.into_output();
-        let pwm_1 = gpio.get(DRIVETRAIN_PWM1)?.into_output();
+        let pwm_0 = gpio.get(pwm0_pin)?.into_output();
+        let pwm_1 = gpio.get(pwm1_pin)?.into_output();
 
         Ok(Self {
             gpio,
@@ -59,16 +59,16 @@ impl DrivetrainController {
         })
     }
 
-    /// Sets the power and direction of the drivetrain at the given pwm frequency.
+    /// Sets the magnitude and direction of an output controlled by software pwm
     ///
-    /// 'output' is a bounded on the interval `[-1.0, 1.0]`. Naturally
-    /// a negative number specifies reverse and a posiive number specifies
-    /// forward and `0.0` is no output. This function will correctly map
-    /// the interval `(0.0, 1.0]` to `(min_duty_cycle, 1.0]` while still
-    /// allowing the setting of output to `0.0`.
+    /// 'output' is a bounded on the interval `[-1.0, 1.0]`. A Negative number
+    /// outputs on pwm0 and a positive number outputs on pwm1 and `0.0` is no
+    /// output. This function will correctly map the interval `(0.0, 1.0]` to
+    /// `(min_duty_cycle, 1.0]` while still allowing the setting of output to
+    /// `0.0`.
     ///
     /// Will panic if output is NaN.
-    pub fn set_output(&mut self, output: f64) -> gpio::Result<()> {
+    pub fn output(&mut self, output: f64) -> gpio::Result<()> {
 
         let output = output.max(-1.0).min(1.0);
 
@@ -87,73 +87,60 @@ impl DrivetrainController {
 
         Ok(())
     }
+}
 
-    // /// Sets the power and direction of the drivetrain at the given pwm frequency.
-    // ///
-    // /// 'output' is a bounded on the interval `[-1.0, 1.0]`. Naturally
-    // /// a negative number specifies reverse and a posiive number specifies
-    // /// forward and `0.0` is no output. This function will correctly map
-    // /// the interval `(0.0, 1.0]` to `(min_duty_cycle, 1.0]` while still
-    // /// allowing the setting of output to `0.0`.
-    // ///
-    // /// `frequency` is specified in hertz (Hz) and must be `>= 0`.
-    // ///
-    // /// Will panic if output or frequency is NaN.
-    // pub fn set_output_with_frequency(&mut self, output: f64, frequency: f64)
-    //     -> gpio::Result<()> {
-
-    //     let output = output.max(-1.0).min(1.0);
-    //     let frequency = frequency.max(0.0);
-
-    //     if output == 0.0 {
-    //         self.pwm_0.set_pwm_frequency(frequency, 0.0)?;
-    //         self.pwm_1.set_pwm_frequency(frequency, 0.0)?;
-    //     } else if output > 0.0 {
-    //         let output = linear_map(output, (0.0, 1.0), (self.min_duty_cycle, 1.0));
-    //         self.pwm_0.set_pwm_frequency(frequency, output)?;
-    //         self.pwm_1.set_pwm_frequency(frequency, 0.0)?;
-    //     } else {
-    //         let output = linear_map(-1.0 * output, (0.0, 1.0), (self.min_duty_cycle, 1.0));
-    //         self.pwm_0.set_pwm_frequency(frequency, 0.0)?;
-    //         self.pwm_1.set_pwm_frequency(frequency, output)?;
-    //     }
-
-    //     Ok(())
-    // }
+impl Drop for DualSoftwarePwm {
+    fn drop(&mut self) {
+        self.output(0.0).unwrap()
+    }
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
 
 
-const STEERING_PWM0: pwm::Channel = pwm::Channel::Pwm0;
-const STEERING_PWM1: pwm::Channel = pwm::Channel::Pwm1;
-
-
-struct SteeringController {
+pub struct DualHardwarePwm {
     pwm_0: pwm::Pwm,
     pwm_1: pwm::Pwm,
     min_duty_cycle: f64,
 }
 
-impl SteeringController {
-
+impl DualHardwarePwm {
+    
+    /// `pwm0_channel` is the pwm hardware channel output on
+    /// 
+    /// `pwm1_channel` is the pwm hardware channel output on
+    /// 
+    /// `frequency` is specified in hertz (Hz) and must be `>= 0`.
+    ///
+    /// `min_duty_cycle` is lowest duty cycle that should be outputted. This
+    /// value is bounded on the interval `[0.0, 1.0]`. By finding and
+    /// setting this value correctly the output functions of will correctly map
+    /// the interval `(0.0, 1.0]` to `(min_duty_cycle, 1.0]` while still
+    /// allowing the setting of output to `0.0`.
+    /// 
+    /// ## Is this still true?
     /// The following line will need to be added to last line in /boot/config.txt
     /// ```txt
     /// dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
     /// ```
-    fn new(frequency: f64, min_duty_cycle: f64) -> pwm::Result<Self> {
+    fn new(
+        pwm0_channel: pwm::Channel,
+        pwm1_channel: pwm::Channel,
+        frequency: f64,
+        min_duty_cycle: f64)
+    -> pwm::Result<Self> {
 
         Ok(Self {
             pwm_0: pwm::Pwm::with_frequency(
-                STEERING_PWM0,
+                pwm0_channel,
                 frequency.max(0.0),
                 0.0,
                 pwm::Polarity::Normal,
                 true,
             )?,
             pwm_1: pwm::Pwm::with_frequency(
-                STEERING_PWM1,
+                pwm1_channel,
                 frequency.max(0.0),
                 0.0,
                 pwm::Polarity::Normal,
@@ -163,16 +150,16 @@ impl SteeringController {
         })
     }
 
-    /// Sets the power and direction of the drivetrain at the given pwm frequency.
+    /// Sets the magnitude and direction of an output controlled by software pwm
     ///
-    /// 'output' is a bounded on the interval `[-1.0, 1.0]`. A positive number
-    /// will steering the car to the right and a negative number will steering
-    /// the car to the left while `0.0` will go straight. This function will
-    /// correctly map the interval `(0.0, 1.0]` to `(min_duty_cycle, 1.0]`
-    /// while still allowing the setting of output to `0.0`.
+    /// 'output' is a bounded on the interval `[-1.0, 1.0]`. A Negative number
+    /// outputs on pwm0 and a positive number outputs on pwm1 and `0.0` is no
+    /// output. This function will correctly map the interval `(0.0, 1.0]` to
+    /// `(min_duty_cycle, 1.0]` while still allowing the setting of output to
+    /// `0.0`.
     ///
     /// Will panic if output is NaN.
-    pub fn set_output(&mut self, output: f64) -> pwm::Result<()> {
+    pub fn output(&self, output: f64) -> pwm::Result<()> {
 
         let output = output.max(-1.0).min(1.0);
 
@@ -193,109 +180,18 @@ impl SteeringController {
     }
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-
-
-/// TODO
-///
-/// The following line will need to be added to last line in /boot/config.txt
-/// dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
-///
-struct TigerCar {
-    steering: DrivetrainController,
-    drivetrain: SteeringController,
-}
-
-
-impl TigerCar {
-
-    /// TODO
-    pub fn new() -> Self {
-
-        Self {
-            steering: DrivetrainController::new(50.0, 0.3).unwrap(),
-            drivetrain: SteeringController::new(50.0, 0.0).unwrap(),
-        }
-    }
-
-    pub fn set_output(&mut self, steering: f64, drive: f64) {
-        self.steering.set_output(steering).unwrap();
-        self.drivetrain.set_output(drive).unwrap();
-    }
-
-    pub fn stop(&mut self) {
-        self.steering.set_output(0.0).unwrap();
-        self.drivetrain.set_output(0.0).unwrap();
-    }
-
-}
-
-impl Drop for TigerCar {
+impl Drop for DualHardwarePwm {
     fn drop(&mut self) {
-        self.stop()
+        self.output(0.0).unwrap()
     }
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
 
-
-use std::thread::sleep;
-use std::time::Duration;
-
-
-fn run_drivetrain() {
-    let mut controller = DrivetrainController::new(50.0, 0.2).unwrap();
-
-    for i in -5..6 {
-        let val = 0.2 * i as f64;
-        println!("Setting {}", val);
-        controller.set_output(val).unwrap();
-        sleep(Duration::new(1, 0));
-    }
-
-    controller.set_output(0.0).unwrap();
-}
-
-fn run_steering() {
-    let mut controller = SteeringController::new(50.0, 0.0).unwrap();
-
-    for i in -5..6 {
-        let val = 0.2 * i as f64;
-        println!("Setting {}", val);
-        controller.set_output(val).unwrap();
-        sleep(Duration::new(1, 0));
-    }
-
-    controller.set_output(0.0).unwrap();
-}
-
-fn run_tiger() {
-    let mut tiger = TigerCar::new();
-
-    tiger.set_output(1.0, 1.0);
-    sleep(Duration::new(1, 0));
-
-    tiger.set_output(1.0, -1.0);
-    sleep(Duration::new(1, 0));
-
-    tiger.set_output(1.0, 1.0);
-    sleep(Duration::new(0, 250_000_000));
-
-    tiger.set_output(1.0, -1.0);
-    sleep(Duration::new(0, 250_000_000));
-
-    tiger.stop();
-}
 
 pub fn run() {
-    // println!("Steering");
-    // run_steering();
-    // println!("Drivetrain");
-    // run_drivetrain();
-    println!("Full tiger");
-    run_tiger();
+    unimplemented!();
 }
 
 
@@ -306,6 +202,76 @@ pub fn run() {
 mod tests {
 
     use super::*;
+
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    // Testing parameters
+    const DRIVETRAIN_PWM0: u8 = 5; // 12
+    const DRIVETRAIN_PWM1: u8 = 6; // 13
+
+    const DRIVETRAIN_PWM_FREQ: f64 = 50.0;
+    const DRIVETRAIN_MIN_DUTY_CYCLE: f64 = 0.2;
+
+    const STEERING_PWM0: pwm::Channel = pwm::Channel::Pwm0;
+    const STEERING_PWM1: pwm::Channel = pwm::Channel::Pwm1;
+
+    const STEERING_PWM_FREQ: f64 = 50.0;
+    const STEERING_MIN_DUTY_CYCLE: f64 = 0.3;
+
+
+    #[test]
+    fn run_drivetrain() {
+        let mut drivetrain = DualSoftwarePwm::new(
+            DRIVETRAIN_PWM0,
+            DRIVETRAIN_PWM1,
+            DRIVETRAIN_PWM_FREQ,
+            DRIVETRAIN_MIN_DUTY_CYCLE
+        ).unwrap();
+
+        for i in -5..6 {
+            let val = 0.2 * i as f64;
+            println!("Setting {}", val);
+            drivetrain.output(val).unwrap();
+            sleep(Duration::new(1, 0));
+        }
+    }
+
+    #[test]
+    fn run_steering() {
+        let steering = DualHardwarePwm::new(
+            STEERING_PWM0,
+            STEERING_PWM1,
+            STEERING_PWM_FREQ,
+            STEERING_MIN_DUTY_CYCLE
+        ).unwrap();
+
+        for i in -5..6 {
+            let val = 0.2 * i as f64;
+            println!("Setting {}", val);
+            steering.output(val).unwrap();
+            sleep(Duration::new(1, 0));
+        }
+    }
+
+    // #[test]
+    // fn run_tiger() {
+    //     let mut tiger = TigerCar::new();
+
+    //     tiger.output(1.0, 1.0);
+    //     sleep(Duration::new(1, 0));
+
+    //     tiger.output(1.0, -1.0);
+    //     sleep(Duration::new(1, 0));
+
+    //     tiger.output(1.0, 1.0);
+    //     sleep(Duration::new(0, 250_000_000));
+
+    //     tiger.output(1.0, -1.0);
+    //     sleep(Duration::new(0, 250_000_000));
+
+    //     tiger.stop();
+    // }
 
     #[test]
     fn test_linear_map() {
