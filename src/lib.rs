@@ -15,8 +15,7 @@ fn linear_map(input: f64, a: (f64, f64), b: (f64, f64)) -> f64 {
 ////////////////////////////////////////////////////////////////////////////////
 
 
-struct DualSoftwarePwm {
-    gpio: gpio::Gpio,
+pub struct DualSoftwarePwm {
     pwm_0: gpio::OutputPin,
     pwm_1: gpio::OutputPin,
     frequency: f64,
@@ -39,7 +38,7 @@ impl DualSoftwarePwm {
     ///
     /// Implemented with software PWMs, therefore higher freuquencies may not
     /// work. Additionally, general performance may not be consistent.
-    fn new(
+    pub fn new(
         pwm0_pin: u8,
         pwm1_pin: u8,
         frequency: f64,
@@ -51,7 +50,6 @@ impl DualSoftwarePwm {
         let pwm_1 = gpio.get(pwm1_pin)?.into_output();
 
         Ok(Self {
-            gpio,
             pwm_0,
             pwm_1,
             frequency: frequency.max(0.0),
@@ -99,6 +97,7 @@ impl Drop for DualSoftwarePwm {
 ////////////////////////////////////////////////////////////////////////////////
 
 
+/// Currently only seems to work in Raspbian
 pub struct DualHardwarePwm {
     pwm_0: pwm::Pwm,
     pwm_1: pwm::Pwm,
@@ -124,7 +123,7 @@ impl DualHardwarePwm {
     /// ```txt
     /// dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
     /// ```
-    fn new(
+    pub fn new(
         pwm0_channel: pwm::Channel,
         pwm1_channel: pwm::Channel,
         frequency: f64,
@@ -218,60 +217,6 @@ mod tests {
 
     const STEERING_PWM_FREQ: f64 = 50.0;
     const STEERING_MIN_DUTY_CYCLE: f64 = 0.3;
-
-
-    #[test]
-    fn run_drivetrain() {
-        let mut drivetrain = DualSoftwarePwm::new(
-            DRIVETRAIN_PWM0,
-            DRIVETRAIN_PWM1,
-            DRIVETRAIN_PWM_FREQ,
-            DRIVETRAIN_MIN_DUTY_CYCLE
-        ).unwrap();
-
-        for i in -5..6 {
-            let val = 0.2 * i as f64;
-            println!("Setting {}", val);
-            drivetrain.output(val).unwrap();
-            sleep(Duration::new(1, 0));
-        }
-    }
-
-    #[test]
-    fn run_steering() {
-        let steering = DualHardwarePwm::new(
-            STEERING_PWM0,
-            STEERING_PWM1,
-            STEERING_PWM_FREQ,
-            STEERING_MIN_DUTY_CYCLE
-        ).unwrap();
-
-        for i in -5..6 {
-            let val = 0.2 * i as f64;
-            println!("Setting {}", val);
-            steering.output(val).unwrap();
-            sleep(Duration::new(1, 0));
-        }
-    }
-
-    // #[test]
-    // fn run_tiger() {
-    //     let mut tiger = TigerCar::new();
-
-    //     tiger.output(1.0, 1.0);
-    //     sleep(Duration::new(1, 0));
-
-    //     tiger.output(1.0, -1.0);
-    //     sleep(Duration::new(1, 0));
-
-    //     tiger.output(1.0, 1.0);
-    //     sleep(Duration::new(0, 250_000_000));
-
-    //     tiger.output(1.0, -1.0);
-    //     sleep(Duration::new(0, 250_000_000));
-
-    //     tiger.stop();
-    // }
 
     #[test]
     fn test_linear_map() {

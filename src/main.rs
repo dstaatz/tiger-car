@@ -3,47 +3,74 @@
 use env_logger;
 use rosrust;
 use tiger_car_ros::*;
-use rppal::pwm;
+
+use std::thread::sleep;
+use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 
 // Future parameters, defaults?
-const DRIVETRAIN_PWM0: u8 = 5; // 12
-const DRIVETRAIN_PWM1: u8 = 6; // 13
+const DRIVETRAIN_PWM0: u8 = 5;
+const DRIVETRAIN_PWM1: u8 = 6;
 
-const STEERING_PWM0: pwm::Channel = pwm::Channel::Pwm0;
-const STEERING_PWM1: pwm::Channel = pwm::Channel::Pwm1;
+const DRIVETRAIN_PWM_FREQ: f64 = 50.0;
+const DRIVETRAIN_MIN_DUTY_CYCLE: f64 = 0.15;
 
-const STEERING_PWM_FREQ: f32 = 50.0;
-const STEERING_MIN_DUTY_CYCLE: f32 = 0.3;
+const STEERING_PWM0: u8 = 12;
+const STEERING_PWM1: u8 = 13;
 
-const DRIVETRAIN_PWM_FREQ: f32 = 50.0;
-const DRIVETRAIN_MIN_DUTY_CYCLE: f32 = 0.2;
+const STEERING_PWM_FREQ: f64 = 50.0;
+const STEERING_MIN_DUTY_CYCLE: f64 = 0.2;
+
 
 
 fn main() {
+
+    // Setup
     env_logger::init();
-
-    // Initialize node
     rosrust::init("listener");
-
-    // Create subscriber
-    // The subscriber is stopped when the returned object is destroyed
-    let steering_subscriber = rosrust::subscribe("/tiger-car/control/steering", 8, |v: rosrust_msg::std_msgs::Float32| {
-        // Callback for handling received messages
-        rosrust::ros_info!("Steering Received: {}", v.data);
-    })
-    .unwrap();
-
-    // Create subscriber
-    // The subscriber is stopped when the returned object is destroyed
-    let drivetrain_subscriber = rosrust::subscribe("/tiger-car/control/drivetrain", 8, |v: rosrust_msg::std_msgs::Float32| {
-        // Callback for handling received messages
-        rosrust::ros_info!("Drivetrain Received: {}", v.data);
-    })
-    .unwrap();
-
     let log_names = rosrust::param("~log_names").unwrap().get().unwrap_or(false);
 
+    let steering = Arc::new(Mutex::new(DualSoftwarePwm::new(
+        STEERING_PWM0,
+        STEERING_PWM1,
+        STEERING_PWM_FREQ,
+        STEERING_MIN_DUTY_CYCLE,
+    ).unwrap()));
+
+    let drivetrain = Arc::new(Mutex::new(DualSoftwarePwm::new(
+        DRIVETRAIN_PWM0,
+        DRIVETRAIN_PWM1,
+        DRIVETRAIN_PWM_FREQ,
+        DRIVETRAIN_MIN_DUTY_CYCLE,
+    ).unwrap()));
+
+    // Subscriptions
+    let steering_subscriber = rosrust::subscribe(
+        "/tiger-car/control/steering",
+        8,
+        move |v: rosrust_msg::std_msgs::Float64| {
+            rosrust::ros_info!("Steering Received: {}", v.data);
+            let result = steering.lock().unwrap().output(v.data);
+            if result.is_err() {
+                rosrust::ros_err!("Steering Error: {}", result.unwrap_err());
+            }
+        }
+    ).unwrap();
+
+    let drivetrain_subscriber = rosrust::subscribe(
+        "/tiger-car/control/drivetrain",
+        8,
+        move |v: rosrust_msg::std_msgs::Float64| {
+            rosrust::ros_info!("Drivetrain Received: {}", v.data);
+            let result = drivetrain.lock().unwrap().output(v.data);
+            if result.is_err() {
+                rosrust::ros_err!("Drivetrain Error: {}", result.unwrap_err());
+            }
+        }
+    ).unwrap();
+
+    // Loop
     if log_names {
         let rate = rosrust::rate(1.0);
         while rosrust::is_ok() {
@@ -54,5 +81,42 @@ fn main() {
     } else {
         // Block the thread until a shutdown signal is received
         rosrust::spin();
+    }
+}
+
+
+// Manual tests
+
+fn test_drivetrain_range() {
+    let mut drivetrain = DualSoftwarePwm::new(
+        DRIVETRAIN_PWM0,
+        DRIVETRAIN_PWM1,
+        DRIVETRAIN_PWM_FREQ,
+        DRIVETRAIN_MIN_DUTY_CYCLE,
+    ).unwrap();
+
+    for i in -5..6 {
+        let val = 0.05 * i as f64;
+        println!("Setting {:.2}", val);
+        drivetrain.output(val).unwrap();
+        sleep(Duration::new(3, 0));
+    }
+}
+
+fn test_steering_range() {
+    let mut steering = DualSoftwarePwm::new(
+        STEERING_PWM0,
+        STEERING_PWM1,
+        STEERING_PWM_FREQ,
+        STEERING_MIN_DUTY_CYCLE,
+    ).unwrap();
+
+    for i in -10..11 {
+        let val = -1.0 * 0.1 * i as f64;
+        steering.output(0.0).unwrap();
+        sleep(Duration::new(0, 100_000_000));
+        println!("Setting {:.2}", val);
+        steering.output(val).unwrap();
+        sleep(Duration::new(0, 1_000_000_000));
     }
 }
