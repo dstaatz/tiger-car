@@ -23,13 +23,18 @@ const STEERING_PWM_FREQ: f64 = 50.0;
 const STEERING_MIN_DUTY_CYCLE: f64 = 0.2;
 
 
-
 fn main() {
+
+    println!("Starting program");
 
     // Setup
     env_logger::init();
-    rosrust::init("listener");
+    rosrust::init("tiger_car");
     let log_names = rosrust::param("~log_names").unwrap().get().unwrap_or(false);
+
+    rosrust::ros_info!("Starting tiger_car");
+
+    // TODO: get parameters
 
     let steering = Arc::new(Mutex::new(DualSoftwarePwm::new(
         STEERING_PWM0,
@@ -47,7 +52,7 @@ fn main() {
 
     // Subscriptions
     let steering_subscriber = rosrust::subscribe(
-        "/tiger-car/control/steering",
+        "/tiger_car/control/steering",
         8,
         move |v: rosrust_msg::std_msgs::Float64| {
             rosrust::ros_info!("Steering Received: {}", v.data);
@@ -59,7 +64,7 @@ fn main() {
     ).unwrap();
 
     let drivetrain_subscriber = rosrust::subscribe(
-        "/tiger-car/control/drivetrain",
+        "/tiger_car/control/drivetrain",
         8,
         move |v: rosrust_msg::std_msgs::Float64| {
             rosrust::ros_info!("Drivetrain Received: {}", v.data);
