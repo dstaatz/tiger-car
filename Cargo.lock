@@ -1287,6 +1287,7 @@ name = "tiger-car-ros"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "error-chain 0.12.4",
  "rosrust",
  "rosrust_msg",
  "rppal",
