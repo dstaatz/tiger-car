@@ -65,7 +65,7 @@ pub fn run() -> Result<()> {
 
     // Subscriptions
     let steering_subscriber = rosrust::subscribe(
-        "/tiger_car/control/steering",
+        "/tiger_car/steer",
         8,
         move |v: std_msgs::Float64| {
             rosrust::ros_info!("Steering Received: {}", v.data);
@@ -77,7 +77,7 @@ pub fn run() -> Result<()> {
     )?;
 
     let drivetrain_subscriber = rosrust::subscribe(
-        "/tiger_car/control/drivetrain",
+        "/tiger_car/speed",
         8,
         move |v: std_msgs::Float64| {
             rosrust::ros_info!("Drivetrain Received: {}", v.data);
