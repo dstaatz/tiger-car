@@ -104,7 +104,7 @@ impl DualSoftwarePwm {
                 },
                 x if x < -min => { // backwards
                     self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
-                    self.pwm_1.set_pwm_frequency(self.frequency, output)?;
+                    self.pwm_1.set_pwm_frequency(self.frequency, -output)?;
                 },
                 _ => { // Stop
                     self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
@@ -224,7 +224,7 @@ impl DualHardwarePwm {
                 },
                 x if x < -min => { // backwards
                     self.pwm_0.set_duty_cycle(0.0)?;
-                    self.pwm_1.set_duty_cycle(output)?;
+                    self.pwm_1.set_duty_cycle(-output)?;
                 },
                 _ => { // Stop
                     self.pwm_0.set_duty_cycle(0.0)?;
