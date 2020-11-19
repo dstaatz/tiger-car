@@ -1,6 +1,8 @@
 /* Copyright (C) 2020 Dylan Staatz - All Rights Reserved. */
 
 
+use std::cmp::Ordering;
+
 use rppal::gpio;
 use rppal::pwm;
 
@@ -20,6 +22,7 @@ pub struct DualSoftwarePwm {
     pwm_1: gpio::OutputPin,
     frequency: f64,
     min_duty_cycle: f64,
+    scale_min: bool,
 }
 
 impl DualSoftwarePwm {
@@ -31,10 +34,13 @@ impl DualSoftwarePwm {
     /// `frequency` is specified in hertz (Hz) and must be `>= 0`.
     ///
     /// `min_duty_cycle` is lowest duty cycle that should be outputted. This
-    /// value is bounded on the interval `[0.0, 1.0]`. By finding and
-    /// setting this value correctly the output functions of will correctly map
+    /// value is bounded on the interval `[0.0, 1.0]`. If `scale_min` is true,
+    /// the output functions of will be correct mapped to the
     /// the interval `(0.0, 1.0]` to `(min_duty_cycle, 1.0]` while still
-    /// allowing the setting of output to `0.0`.
+    /// allowing the setting of output to `0.0`. If `scale_min` is the false,
+    /// the minimum values will just force the output to `0.0`.
+    /// 
+    /// `scale_main` see `min_duty_cycle`
     ///
     /// Implemented with software PWMs, therefore higher freuquencies may not
     /// work. Additionally, general performance may not be consistent.
@@ -42,8 +48,9 @@ impl DualSoftwarePwm {
         pwm0_pin: u8,
         pwm1_pin: u8,
         frequency: f64,
-        min_duty_cycle: f64)
-    -> gpio::Result<Self> {
+        min_duty_cycle: f64,
+        scale_min: bool,
+    ) -> gpio::Result<Self> {
 
         let gpio = gpio::Gpio::new()?;
         let pwm_0 = gpio.get(pwm0_pin)?.into_output();
@@ -54,6 +61,7 @@ impl DualSoftwarePwm {
             pwm_1,
             frequency: frequency.max(0.0),
             min_duty_cycle: min_duty_cycle.max(0.0).min(1.0),
+            scale_min,
         })
     }
 
@@ -69,18 +77,40 @@ impl DualSoftwarePwm {
     pub fn output(&mut self, output: f64) -> gpio::Result<()> {
 
         let output = output.max(-1.0).min(1.0);
+        let min = self.min_duty_cycle;
 
-        if output == 0.0 {
-            self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
-            self.pwm_1.set_pwm_frequency(self.frequency, 0.0)?;
-        } else if output > 0.0 {
-            let output = linear_map(output, (0.0, 1.0), (self.min_duty_cycle, 1.0));
-            self.pwm_0.set_pwm_frequency(self.frequency, output)?;
-            self.pwm_1.set_pwm_frequency(self.frequency, 0.0)?;
+        if self.scale_min {
+            match output.partial_cmp(&0.0) {
+                Some(Ordering::Greater) => { // forwards
+                    let output = linear_map(output, (0.0, 1.0), (min, 1.0));
+                    self.pwm_0.set_pwm_frequency(self.frequency, output)?;
+                    self.pwm_1.set_pwm_frequency(self.frequency, 0.0)?;
+                },
+                Some(Ordering::Less) => { // backwards
+                    let output = linear_map(-1.0 * output, (0.0, 1.0), (min, 1.0));
+                    self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
+                    self.pwm_1.set_pwm_frequency(self.frequency, output)?;
+                },
+                _ => { // Stop
+                    self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
+                    self.pwm_1.set_pwm_frequency(self.frequency, 0.0)?;
+                },
+            }
         } else {
-            let output = linear_map(-1.0 * output, (0.0, 1.0), (self.min_duty_cycle, 1.0));
-            self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
-            self.pwm_1.set_pwm_frequency(self.frequency, output)?;
+            match output {
+                x if min < x => { // forwards
+                    self.pwm_0.set_pwm_frequency(self.frequency, output)?;
+                    self.pwm_1.set_pwm_frequency(self.frequency, 0.0)?;
+                },
+                x if x < -min => { // backwards
+                    self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
+                    self.pwm_1.set_pwm_frequency(self.frequency, output)?;
+                },
+                _ => { // Stop
+                    self.pwm_0.set_pwm_frequency(self.frequency, 0.0)?;
+                    self.pwm_1.set_pwm_frequency(self.frequency, 0.0)?;
+                },
+            }
         }
 
         Ok(())
@@ -102,6 +132,7 @@ pub struct DualHardwarePwm {
     pwm_0: pwm::Pwm,
     pwm_1: pwm::Pwm,
     min_duty_cycle: f64,
+    scale_min: bool,
 }
 
 impl DualHardwarePwm {
@@ -113,10 +144,13 @@ impl DualHardwarePwm {
     /// `frequency` is specified in hertz (Hz) and must be `>= 0`.
     ///
     /// `min_duty_cycle` is lowest duty cycle that should be outputted. This
-    /// value is bounded on the interval `[0.0, 1.0]`. By finding and
-    /// setting this value correctly the output functions of will correctly map
+    /// value is bounded on the interval `[0.0, 1.0]`. If `scale_min` is true,
+    /// the output functions of will be correct mapped to the
     /// the interval `(0.0, 1.0]` to `(min_duty_cycle, 1.0]` while still
-    /// allowing the setting of output to `0.0`.
+    /// allowing the setting of output to `0.0`. If `scale_min` is the false,
+    /// the minimum values will just force the output to `0.0`.
+    /// 
+    /// `scale_main` see `min_duty_cycle`
     /// 
     /// ## Is this still true?
     /// The following line will need to be added to last line in /boot/config.txt
@@ -127,8 +161,9 @@ impl DualHardwarePwm {
         pwm0_channel: pwm::Channel,
         pwm1_channel: pwm::Channel,
         frequency: f64,
-        min_duty_cycle: f64)
-    -> pwm::Result<Self> {
+        min_duty_cycle: f64,
+        scale_min: bool,
+    ) -> pwm::Result<Self> {
 
         Ok(Self {
             pwm_0: pwm::Pwm::with_frequency(
@@ -146,6 +181,7 @@ impl DualHardwarePwm {
                 true,
             )?,
             min_duty_cycle: min_duty_cycle.max(0.0).min(1.0),
+            scale_min,
         })
     }
 
@@ -161,19 +197,42 @@ impl DualHardwarePwm {
     pub fn output(&self, output: f64) -> pwm::Result<()> {
 
         let output = output.max(-1.0).min(1.0);
+        let min = self.min_duty_cycle;
 
-        if output == 0.0 {
-            self.pwm_0.set_duty_cycle(0.0)?;
-            self.pwm_1.set_duty_cycle(0.0)?;
-        } else if output > 0.0 {
-            let output = linear_map(output, (0.0, 1.0), (self.min_duty_cycle, 1.0));
-            self.pwm_0.set_duty_cycle(output)?;
-            self.pwm_1.set_duty_cycle(0.0)?;
+        if self.scale_min {
+            match output.partial_cmp(&0.0) {
+                Some(Ordering::Greater) => { // forwards
+                    let output = linear_map(output, (0.0, 1.0), (min, 1.0));
+                    self.pwm_0.set_duty_cycle(output)?;
+                    self.pwm_1.set_duty_cycle(0.0)?;
+                },
+                Some(Ordering::Less) => { // backwards
+                    let output = linear_map(-1.0 * output, (0.0, 1.0), (min, 1.0));
+                    self.pwm_0.set_duty_cycle(0.0)?;
+                    self.pwm_1.set_duty_cycle(output)?;
+                },
+                _ => { // Stop
+                    self.pwm_0.set_duty_cycle(0.0)?;
+                    self.pwm_1.set_duty_cycle(0.0)?;
+                },
+            }
         } else {
-            let output = linear_map(-1.0 * output, (0.0, 1.0), (self.min_duty_cycle, 1.0));
-            self.pwm_0.set_duty_cycle(0.0)?;
-            self.pwm_1.set_duty_cycle(output)?;
+            match output {
+                x if min < x => { // forwards
+                    self.pwm_0.set_duty_cycle(output)?;
+                    self.pwm_1.set_duty_cycle(0.0)?;
+                },
+                x if x < -min => { // backwards
+                    self.pwm_0.set_duty_cycle(0.0)?;
+                    self.pwm_1.set_duty_cycle(output)?;
+                },
+                _ => { // Stop
+                    self.pwm_0.set_duty_cycle(0.0)?;
+                    self.pwm_1.set_duty_cycle(0.0)?;
+                },
+            }
         }
+
 
         Ok(())
     }
@@ -183,14 +242,6 @@ impl Drop for DualHardwarePwm {
     fn drop(&mut self) {
         self.output(0.0).unwrap()
     }
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-
-
-pub fn run() {
-    unimplemented!();
 }
 
 

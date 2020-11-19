@@ -44,13 +44,13 @@ pub fn run() -> Result<()> {
 
     rosrust::ros_info!("Starting tiger_car");
 
-
     let steering = Arc::new(Mutex::new(
         DualSoftwarePwm::new(
             STEERING_PWM0,
             STEERING_PWM1,
             STEERING_PWM_FREQ,
             STEERING_MIN_DUTY_CYCLE,
+            false,
         ).unwrap()
     ));
 
@@ -60,6 +60,7 @@ pub fn run() -> Result<()> {
             DRIVETRAIN_PWM1,
             DRIVETRAIN_PWM_FREQ,
             DRIVETRAIN_MIN_DUTY_CYCLE,
+            false,
         ).unwrap()
     ));
 
@@ -113,6 +114,7 @@ fn test_drivetrain_range() {
         DRIVETRAIN_PWM1,
         DRIVETRAIN_PWM_FREQ,
         DRIVETRAIN_MIN_DUTY_CYCLE,
+        false,
     ).unwrap();
 
     for i in -5..6 {
@@ -129,6 +131,7 @@ fn test_steering_range() {
         STEERING_PWM1,
         STEERING_PWM_FREQ,
         STEERING_MIN_DUTY_CYCLE,
+        false,
     ).unwrap();
 
     for i in -10..11 {
