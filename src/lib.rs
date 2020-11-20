@@ -70,9 +70,16 @@ pub fn run() -> Result<()> {
         8,
         move |v: std_msgs::Float64| {
             rosrust::ros_info!("Steering Received: {}", v.data);
-            let result = steering.lock().unwrap().output(v.data);
-            if result.is_err() {
-                rosrust::ros_err!("Steering Error: {}", result.unwrap_err());
+            if v.data.abs() > 0.5 {
+                let result = steering.lock().unwrap().output(2.0*v.data);
+                if result.is_err() {
+                    rosrust::ros_err!("Steering Error: {}", result.unwrap_err());
+                }
+            } else {
+                let result = steering.lock().unwrap().output(0.0);
+                if result.is_err() {
+                    rosrust::ros_err!("Steering Error: {}", result.unwrap_err());
+                }
             }
         }
     )?;
